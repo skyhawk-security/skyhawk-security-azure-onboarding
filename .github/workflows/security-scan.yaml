@@ -1,0 +1,39 @@
+name: Trivy Security Scan
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
+  actions: read
+  security-events: write
+
+jobs:
+  trivy-security-scan:
+    name: Trivy Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6.0.1
+
+      - name: Run Trivy Security scan
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          scan-type: config
+          scan-ref: .
+          scanners: config,secret
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+          exit-code: 1
+          format: sarif
+          output: trivy-iac-results.sarif
+
+      - name: Upload SARIF results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v4.31.7
+        with:
+          sarif_file: trivy-iac-results.sarif
+          wait-for-processing: true
