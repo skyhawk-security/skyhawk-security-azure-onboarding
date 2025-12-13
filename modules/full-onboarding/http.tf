@@ -31,7 +31,7 @@ data "http" "tenant_registration" {
     "tenantId"       = var.tenant_id
     "subscriptionId" = local.tenant_application_source_config.subscription_id
     "applicationId"  = azuread_application.tenant.client_id
-    "applicationKey" = nonsensitive(azuread_application_password.tenant.value)
+    "applicationKey" = azuread_application_password.tenant.value
     "importance"     = var.subscription_importance
   })
   depends_on = [

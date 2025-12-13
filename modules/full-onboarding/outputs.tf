@@ -70,13 +70,13 @@ output "tenant_registration_debug" {
     tenant_id                              = var.tenant_id
     tenant_registration_enabled            = local.tenant_registration_enabled
     tenant_registration_application_id     = azuread_application.tenant.client_id
-    tenant_registration_application_secret = nonsensitive(azuread_application_password.tenant.value)
+    tenant_registration_application_secret = azuread_application_password.tenant.value
     tenant_registration_authorizer         = local.tenant_registration_authorization
     tenant_registration_request_url        = var.skh_azure_tenant_endpoint
     tenant_registration_body = {
       tenantId       = var.tenant_id
       applicationId  = azuread_application.tenant.client_id
-      applicationKey = nonsensitive(azuread_application_password.tenant.value)
+      applicationKey = azuread_application_password.tenant.value
       importance     = var.subscription_importance
     }
   }
