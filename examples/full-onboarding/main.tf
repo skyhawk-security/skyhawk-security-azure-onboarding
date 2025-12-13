@@ -36,4 +36,3 @@ module "tenant_permissions" {
 #     key                  = "skyhawk-infra.tfstate"
 #   }
 # }
-

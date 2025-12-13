@@ -77,7 +77,7 @@ variable "msgraph_delegated_permissions" {
   default     = ["User.Read"]
 }
 
-variable "skh_azure_teneant_endpoint" {
+variable "skh_azure_tenant_endpoint" {
   description = "Skyhawk endpoint used to register Azure tenant metadata."
   type        = string
   default     = "https://api-x.us-east-1.skyhawk.security/api/v1/accounts/azure/tenant"

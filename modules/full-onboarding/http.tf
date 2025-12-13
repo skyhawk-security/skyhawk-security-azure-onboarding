@@ -18,7 +18,7 @@ data "http" "skh_auth_token" {
 data "http" "tenant_registration" {
   count = var.perform_skyhawk_registration && local.tenant_registration_enabled ? 1 : 0
 
-  url    = var.skh_azure_teneant_endpoint
+  url    = var.skh_azure_tenant_endpoint
   method = "POST"
 
   request_headers = {

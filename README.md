@@ -76,7 +76,7 @@ See `examples/full-onboarding` for a ready-to-fill sample.
 - `application_display_name` (string, default `skh-onboarder-1`) – Base name for the AAD app/service principal (auto-uniquified per subscription).
 - `application_password_validity` (string, default `17520h`) – Duration for the generated client secret.
 - `msgraph_roles` / `msgraph_delegated_permissions` – Graph app roles and delegated permissions granted to the service principal.
-- `auth_endpoint`, `skh_azure_teneant_endpoint`, `skh_azure_account_endpoint`, `subscription_importance` – Skyhawk API endpoints and metadata; override only if instructed by Skyhawk.
+- `auth_endpoint`, `skh_azure_tenant_endpoint`, `skh_azure_account_endpoint`, `subscription_importance` – Skyhawk API endpoints and metadata; override only if instructed by Skyhawk.
 
 ## Outputs
 - `tenant_permissions` – IDs/names for the resource group, storage account, and AAD app/SP per subscription.
