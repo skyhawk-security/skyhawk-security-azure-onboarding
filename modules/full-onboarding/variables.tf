@@ -22,7 +22,7 @@ variable "skh_api_secret_key" {
 variable "auth_endpoint" {
   description = "Authentication endpoint used to exchange API credentials for a JWT token."
   type        = string
-  default     = "https://api-x.us-east-1.skyhawk.security/api/v1/accesskeys/authentication"
+  default     = "https://api-x.us-east-1.dev-cwp.seculert.com/api/v1/accesskeys/authenticati"
 }
 
 variable "subscription_ids" {
@@ -99,4 +99,10 @@ variable "perform_skyhawk_registration" {
   description = "Set true (typically only during terraform apply) to execute Skyhawk authentication and registration HTTP calls."
   type        = bool
   default     = false
+}
+
+variable "enable_vnet_flow_logs" {
+  description = "Enable VNet Flow Logs on all discovered VNets in the subscription. Set false to skip flow log creation."
+  type        = bool
+  default     = true
 }
