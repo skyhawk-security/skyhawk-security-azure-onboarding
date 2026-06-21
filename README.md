@@ -1,13 +1,14 @@
 # Skyhawk Security Azure Onboarding (Terraform Module)
 
 ## Overview
-Terraform module that onboards one or more Azure subscriptions to Skyhawk Security. It creates an Azure AD application/service principal with Microsoft Graph permissions, assigns Reader/Storage Blob Data Reader and a custom Skyhawk role, provisions a storage account for logs, wires Activity Logs to that storage account, and sets an Event Grid subscription to forward security log blobs to the Skyhawk ingestion webhook. Optionally, it authenticates to Skyhawk and registers the tenant/subscriptions via HTTP API calls.
+Terraform module that onboards one or more Azure subscriptions to Skyhawk Security. It creates an Azure AD application/service principal with Microsoft Graph permissions, assigns Reader/Storage Blob Data Reader and a custom Skyhawk role, provisions a storage account for logs, wires Activity Logs and VNet Flow Logs to that storage account, and sets an Event Grid subscription to forward security log blobs to the Skyhawk ingestion webhook. Optionally, it authenticates to Skyhawk and registers the tenant/subscriptions via HTTP API calls.
 
 ## What it creates
 - Azure AD application/service principal with configurable Graph app roles and delegated permissions, plus a long-lived client secret.
-- Provider registration for `Microsoft.Storage`, `Microsoft.Insights`, and `Microsoft.EventGrid` in each target subscription.
+- Provider registration for `Microsoft.Storage`, `Microsoft.Insights`, `Microsoft.EventGrid`, and `Microsoft.Network` in each target subscription.
 - Resource group and StorageV2 account per subscription; Activity Log diagnostic settings writing to that storage account.
-- Event Grid webhook subscription on the storage account (filters Network Security Group flow logs, Activity Logs, Audit Logs, Sign-in Logs, StorageRead).
+- VNet Flow Logs for all discovered VNets in each subscription, writing to the same storage account (enabled by default, opt-out via `enable_vnet_flow_logs = false`).
+- Event Grid webhook subscription on the storage account (filters VNet Flow Logs, NSG Flow Logs, Activity Logs, Audit Logs, Sign-in Logs, StorageRead).
 - Role assignments for the service principal: Reader on subscriptions and management group, Storage Blob Data Reader, and a custom Skyhawk role (query flow log status).
 - Skyhawk API flows: register the tenant, then register additional subscriptions.
 
@@ -38,8 +39,9 @@ provider "azuread" {
 
 provider "azapi" {}
 
-module "skyhawk_full_onboarding" {
-  source = "../../modules/full-onboarding/"
+module "skyhawk_onboarding" {
+  source  = "skyhawk-security/onboarding/azure"
+  version = "2.0.0"
 
   tenant_id               = var.tenant_id
   skh_api_access_key_id   = "<skyhawk-access-key-id>"   # from portal Access keys
@@ -51,6 +53,10 @@ module "skyhawk_full_onboarding" {
   # Keep true to call Skyhawk APIs (auth + tenant/subscription registration).
   # Set false only if Skyhawk instructs you not to call the APIs.
   perform_skyhawk_registration = true
+
+  # VNet Flow Logs are enabled by default for all VNets.
+  # Set false to skip flow log creation.
+  # enable_vnet_flow_logs = false
 
   # Optional overrides
   # resource_group_locations = { "<sub-1-guid>" = "westus2" }
@@ -72,6 +78,7 @@ See `examples/full-onboarding` for a ready-to-fill sample.
 - `skh_api_url` (string, required) – Skyhawk-provided ingestion webhook used by Event Grid.
 - `skh_api_access_key_id` / `skh_api_secret_key` (string, required) – Generated in Skyhawk portal under Access keys.
 - `perform_skyhawk_registration` (bool) – Keep true to execute Skyhawk auth + tenant/account registration; set false only if Skyhawk instructs you to skip API calls.
+- `enable_vnet_flow_logs` (bool, default `true`) – Auto-discover all VNets and create flow logs. Set false to skip.
 - `resource_group_location` (string, default `eastus`) – Region for created resource groups; can override per subscription via `resource_group_locations`.
 - `application_display_name` (string, default `skh-onboarder-1`) – Base name for the AAD app/service principal (auto-uniquified per subscription).
 - `application_password_validity` (string, default `17520h`) – Duration for the generated client secret.
@@ -85,6 +92,20 @@ See `examples/full-onboarding` for a ready-to-fill sample.
 - `tenant_registration_response` / `account_registration_responses` (sensitive) – Raw HTTP response data from Skyhawk tenant/account registration.
 - `tenant_registration_debug` / `account_registration_debug` (sensitive) – Debug payloads for the Skyhawk API requests.
 
+## Upgrading from v1.x
+
+In v2.0.0, the module code moved from `modules/full-onboarding/` to the repository root. Update your source:
+
+```hcl
+# Before (v1.x):
+source = "skyhawk-security/onboarding/azure//modules/full-onboarding"
+
+# After (v2.x):
+source  = "skyhawk-security/onboarding/azure"
+version = "2.0.0"
+```
+
 ## Notes
 - Leave `perform_skyhawk_registration` true unless Skyhawk tells you to disable API calls.
 - The module registers required resource providers and waits for registration; applies may take a few minutes.
+- VNet Flow Logs are auto-discovered and created for all VNets in onboarded subscriptions. No VNet IDs need to be specified.
