@@ -22,7 +22,7 @@ variable "skh_api_secret_key" {
 variable "auth_endpoint" {
   description = "Authentication endpoint used to exchange API credentials for a JWT token."
   type        = string
-  default     = "https://api-x.us-east-1.dev-cwp.seculert.com/api/v1/accesskeys/authenticati"
+  default     = "https://api-x.us-east-1.skyhawk.security/api/v1/accesskeys/authentication"
 }
 
 variable "subscription_ids" {
