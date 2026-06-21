@@ -309,6 +309,7 @@ resource "azapi_resource" "storage_event_subscription" {
             operatorType = "StringBeginsWith"
             values = [
               "/blobServices/default/containers/insights-logs-networksecuritygroupflowevent/blobs/",
+              "/blobServices/default/containers/insights-logs-flowlogflowevent/blobs/",
               "/blobServices/default/containers/insights-activity-logs/blobs/",
               "/blobServices/default/containers/insights-logs-auditlogs/blobs/",
               "/blobServices/default/containers/insights-logs-signinlogs/blobs/",

@@ -100,3 +100,9 @@ variable "perform_skyhawk_registration" {
   type        = bool
   default     = false
 }
+
+variable "enable_vnet_flow_logs" {
+  description = "Enable VNet Flow Logs on all discovered VNets in the subscription. Set false to skip flow log creation."
+  type        = bool
+  default     = true
+}
