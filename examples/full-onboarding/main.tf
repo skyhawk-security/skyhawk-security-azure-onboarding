@@ -5,7 +5,7 @@ provider "azuread" {
 provider "azapi" {}
 
 module "tenant_permissions" {
-  source = "../../modules/full-onboarding/"
+  source = "../../"
 
   tenant_id             = var.tenant_id
   skh_api_access_key_id = var.skh_api_access_key_id
