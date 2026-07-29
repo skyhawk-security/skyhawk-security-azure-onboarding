@@ -1,0 +1,23 @@
+resources:
+  webhooks:
+    - webhook: Dev-test         # Webhook name matching your service connection
+      connection: Dev-test      # Service connection name
+
+trigger: none
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+# 1. Print standard parameters passed from the webhook JSON body
+- script: |
+    echo "=========================================="
+    echo "Webhook Triggered Pipeline Successfully!"
+    echo "=========================================="
+    echo "Attack ID: ${{ parameters['Dev-test']['message']['id'] }}"
+    echo "Simulations Count: ${{ parameters['Dev-test']['message']['simulations_count'] }}"
+    echo "Cloud Vendors: ${{ parameters['Dev-test']['message']['cloud_vendors'] }}"
+    echo "First Detected: ${{ parameters['Dev-test']['message']['first_detected'] }}"
+    echo "Details URL: ${{ parameters['Dev-test']['message']['details_url'] }}"
+    echo "=========================================="
+  displayName: 'Display Incoming Webhook Payload'
