@@ -1,7 +1,7 @@
 resources:
   webhooks:
-    - webhook: Dev-test         # Webhook name matching your service connection
-      connection: Dev-test      # Service connection name
+    - webhook: IncomingWebhook      # Webhook alias (no hyphens!)
+      connection: Dev-test          # Service connection name (matches Azure DevOps)
 
 trigger: none
 
@@ -9,15 +9,25 @@ pool:
   vmImage: ubuntu-latest
 
 steps:
+# Debug: Print all available parameters
+- script: |
+    echo "=========================================="
+    echo "DEBUG: Checking if webhook data exists"
+    echo "=========================================="
+    echo "Full parameters object:"
+    echo '${{ convertToJson(parameters) }}'
+    echo "=========================================="
+  displayName: 'Debug - Show All Parameters'
+
 # 1. Print standard parameters passed from the webhook JSON body
 - script: |
     echo "=========================================="
     echo "Webhook Triggered Pipeline Successfully!"
     echo "=========================================="
-    echo "Attack ID: ${{ parameters['Dev-test'].message.id }}"
-    echo "Simulations Count: ${{ parameters['Dev-test'].message.simulations_count }}"
-    echo "Cloud Vendors: ${{ parameters['Dev-test'].message.cloud_vendors }}"
-    echo "First Detected: ${{ parameters['Dev-test'].message.first_detected }}"
-    echo "Details URL: ${{ parameters['Dev-test'].message.details_url }}"
+    echo "Attack ID: ${{ parameters.IncomingWebhook.message.id }}"
+    echo "Simulations Count: ${{ parameters.IncomingWebhook.message.simulations_count }}"
+    echo "Cloud Vendors: ${{ parameters.IncomingWebhook.message.cloud_vendors }}"
+    echo "First Detected: ${{ parameters.IncomingWebhook.message.first_detected }}"
+    echo "Details URL: ${{ parameters.IncomingWebhook.message.details_url }}"
     echo "=========================================="
   displayName: 'Display Incoming Webhook Payload'
