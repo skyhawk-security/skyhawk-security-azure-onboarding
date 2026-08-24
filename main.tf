@@ -1,4 +1,9 @@
 locals {
+  default_tags = {
+    "managed-by" = "skyhawk-security"
+  }
+  merged_tags = merge(local.default_tags, var.tags)
+
   application_password_display_name = "client-secret"
 
   multi_subscription_context = length(var.subscription_ids) > 1
@@ -246,6 +251,7 @@ resource "azapi_resource" "resource_group" {
 
   body = {
     location = each.value.resource_group_location
+    tags     = local.merged_tags
   }
 
   depends_on = [azapi_resource_action.provider_registration_state]
@@ -264,6 +270,7 @@ resource "azapi_resource" "storage_account" {
       name = "Standard_LRS"
     }
     kind = "StorageV2"
+    tags = local.merged_tags
     properties = {
       allowBlobPublicAccess    = false
       minimumTlsVersion        = "TLS1_2"

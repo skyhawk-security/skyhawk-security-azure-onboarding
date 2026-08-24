@@ -106,3 +106,9 @@ variable "enable_vnet_flow_logs" {
   type        = bool
   default     = true
 }
+
+variable "tags" {
+  description = "Map of tags to apply to all taggable resources created by this module. These are merged with default Skyhawk tags; customer-provided tags take precedence on conflicts."
+  type        = map(string)
+  default     = {}
+}

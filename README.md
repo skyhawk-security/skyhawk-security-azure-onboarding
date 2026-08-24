@@ -58,6 +58,13 @@ module "skyhawk_onboarding" {
   # Set false to skip flow log creation.
   # enable_vnet_flow_logs = false
 
+  # Optional: custom tags applied to all created resources
+  # tags = {
+  #   environment  = "production"
+  #   cost-center  = "security"
+  #   project      = "skyhawk-onboarding"
+  # }
+
   # Optional overrides
   # resource_group_locations = { "<sub-1-guid>" = "westus2" }
   # application_display_name  = "skh-onboarder"
@@ -79,6 +86,7 @@ See `examples/full-onboarding` for a ready-to-fill sample.
 - `skh_api_access_key_id` / `skh_api_secret_key` (string, required) – Generated in Skyhawk portal under Access keys.
 - `perform_skyhawk_registration` (bool) – Keep true to execute Skyhawk auth + tenant/account registration; set false only if Skyhawk instructs you to skip API calls.
 - `enable_vnet_flow_logs` (bool, default `true`) – Auto-discover all VNets and create flow logs. Set false to skip.
+- `tags` (map(string), default `{}`) – Custom tags to apply to all taggable resources (resource groups, storage accounts, flow logs, Event Grid subscriptions). Merged with the default `managed-by = skyhawk-security` tag; customer-provided tags take precedence on conflicts.
 - `resource_group_location` (string, default `eastus`) – Region for created resource groups; can override per subscription via `resource_group_locations`.
 - `application_display_name` (string, default `skh-onboarder-1`) – Base name for the AAD app/service principal (auto-uniquified per subscription).
 - `application_password_validity` (string, default `17520h`) – Duration for the generated client secret.
