@@ -75,6 +75,7 @@ resource "azapi_resource" "vnet_flow_log_resource_group" {
 
   body = {
     location = each.value.location
+    tags     = local.merged_tags
   }
 
   depends_on = [azapi_resource_action.register_network_provider]
@@ -94,6 +95,7 @@ resource "azapi_resource" "vnet_flow_log_storage_account" {
       name = "Standard_LRS"
     }
     kind = "StorageV2"
+    tags = local.merged_tags
     properties = {
       allowBlobPublicAccess    = false
       minimumTlsVersion        = "TLS1_2"
@@ -124,6 +126,7 @@ resource "azapi_resource" "vnet_flow_log" {
   location = each.value.location
 
   body = {
+    tags = local.merged_tags
     properties = {
       enabled          = true
       storageId        = azapi_resource.vnet_flow_log_storage_account[format("%s|%s", each.value.subscription_id, each.value.location)].id
