@@ -111,4 +111,19 @@ variable "tags" {
   description = "Map of tags to apply to all taggable resources created by this module. These are merged with default Skyhawk tags; customer-provided tags take precedence on conflicts."
   type        = map(string)
   default     = {}
+
+  validation {
+    condition     = length(var.tags) <= 49
+    error_message = "Azure allows a maximum of 50 tags per resource. Since the module adds 1 default tag (managed-by), you can provide at most 49 custom tags."
+  }
+
+  validation {
+    condition     = alltrue([for k, v in var.tags : length(k) <= 512])
+    error_message = "Azure tag keys must not exceed 512 characters."
+  }
+
+  validation {
+    condition     = alltrue([for k, v in var.tags : length(v) <= 256])
+    error_message = "Azure tag values must not exceed 256 characters."
+  }
 }
