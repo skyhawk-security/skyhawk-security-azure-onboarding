@@ -1,4 +1,15 @@
 locals {
+  # BUG-5: Azure Storage networkAcls.ipRules require a bare IPv4 or CIDR, and it REJECTS a "/32"
+  # suffix (a single host must be given without the mask). Strip a trailing /32 while keeping real
+  # CIDR ranges intact. Used by both storage accounts to allow-list the Skyhawk collector egress IPs
+  # under defaultAction = "Deny".
+  collector_ip_rules = [
+    for cidr in var.collector_egress_ips : {
+      value  = endswith(cidr, "/32") ? trimsuffix(cidr, "/32") : cidr
+      action = "Allow"
+    }
+  ]
+
   discovered_vnets = var.enable_vnet_flow_logs ? {
     for item in flatten([
       for sub_id in var.subscription_ids : [
@@ -33,14 +44,16 @@ locals {
 
   vnet_storage_account_names = {
     for key, item in local.vnet_storage_accounts :
-    key => substr(
-      format(
-        "skhflow%s%s",
-        substr(replace(item.subscription_id, "-", ""), 0, 10),
-        substr(replace(item.location, "-", ""), 0, 6),
-      ),
-      0,
-      24,
+    # BUG-1 fix: region was previously truncated to 6 chars (substr(...,0,6)), which collapsed
+    # region variants like "eastus" and "eastus2" to the same name "eastus" and caused a global
+    # StorageAccountAlreadyTaken (409) collision. We now derive a deterministic, fixed-length,
+    # collision-free suffix from a hash of the full "subscription_id|location" key. This guarantees
+    # a unique name per subscription+region while staying within the 3-24 char, lowercase-alnum
+    # storage account naming rules.
+    #   "skhflow" (7) + 17 hex chars = 24 chars exactly.
+    key => format(
+      "skhflow%s",
+      substr(sha1(format("%s|%s", item.subscription_id, item.location)), 0, 17),
     )
   }
 }
@@ -101,9 +114,13 @@ resource "azapi_resource" "vnet_flow_log_storage_account" {
       minimumTlsVersion        = "TLS1_2"
       supportsHttpsTrafficOnly = true
       networkAcls = {
-        bypass              = "AzureServices"
-        defaultAction       = "Allow"
-        ipRules             = []
+        bypass = "AzureServices"
+        # BUG-5 fix (CIS Azure 3.7): was "Allow" (storage account reachable from the whole internet).
+        # Now "Deny" by default. First-party Azure writers (Network Watcher, Event Grid, diagnostic
+        # settings) reach it via bypass = "AzureServices"; the Skyhawk collectors reach it via the
+        # explicit ipRules allow-list below.
+        defaultAction       = "Deny"
+        ipRules             = local.collector_ip_rules
         virtualNetworkRules = []
       }
     }
@@ -138,6 +155,17 @@ resource "azapi_resource" "vnet_flow_log" {
       retentionPolicy = {
         days    = 0
         enabled = false
+      }
+      # BUG-2 fix: previously this block was omitted entirely. On a re-apply against a flow log that
+      # already had Traffic Analytics enabled (FlowAnalysisEnabled = true), Azure rejected the PUT
+      # with "FlowLogConfigurationCannotBeUpdated" because the value would transition from true to
+      # unspecified. We now always send an explicit flowAnalyticsConfiguration so the desired state
+      # is unambiguous and re-applies are idempotent. Skyhawk does not use Azure Traffic Analytics
+      # (we ingest raw flow logs via Event Grid), so we explicitly disable it here.
+      flowAnalyticsConfiguration = {
+        networkWatcherFlowAnalyticsConfiguration = {
+          enabled = false
+        }
       }
     }
   }

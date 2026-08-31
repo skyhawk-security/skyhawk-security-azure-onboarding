@@ -107,6 +107,32 @@ variable "enable_vnet_flow_logs" {
   default     = true
 }
 
+variable "collector_egress_ips" {
+  description = <<-EOT
+    Public egress IP addresses (CIDR notation) of the Skyhawk log collectors that read blob content
+    from the created storage accounts. These are added to the storage account network ACL ipRules so
+    that, with defaultAction = "Deny" (CIS Azure 3.7 compliant), the collectors can still read logs
+    while the wider internet is blocked. First-party Azure writers (Network Watcher, Event Grid,
+    diagnostic settings) are already permitted via bypass = "AzureServices" and do not need to be
+    listed here.
+
+    Must include every region's collector egress IP that may read a given customer's blobs.
+    Known values (verify per environment):
+      - prod us-east-1 NAT: 3.227.150.87/32
+    If left empty, storage accounts still default to Deny but ONLY Azure services can reach them,
+    which will break external blob reads — set this before onboarding real customers.
+  EOT
+  type        = list(string)
+  default     = ["3.227.150.87/32"]
+
+  validation {
+    condition = alltrue([
+      for cidr in var.collector_egress_ips : can(cidrhost(cidr, 0))
+    ])
+    error_message = "Each entry in collector_egress_ips must be valid CIDR notation (e.g., 3.227.150.87/32)."
+  }
+}
+
 variable "tags" {
   description = "Map of tags to apply to all taggable resources created by this module. These are merged with default Skyhawk tags; customer-provided tags take precedence on conflicts."
   type        = map(string)

@@ -276,9 +276,13 @@ resource "azapi_resource" "storage_account" {
       minimumTlsVersion        = "TLS1_2"
       supportsHttpsTrafficOnly = true
       networkAcls = {
-        bypass              = "AzureServices"
-        defaultAction       = "Allow"
-        ipRules             = []
+        bypass = "AzureServices"
+        # BUG-5 fix (CIS Azure 3.7): was "Allow" (storage account reachable from the whole internet).
+        # Now "Deny" by default. First-party Azure writers (Event Grid, diagnostic settings) reach it
+        # via bypass = "AzureServices"; the Skyhawk collectors reach it via the explicit ipRules
+        # allow-list (local.collector_ip_rules, defined in flow_logs.tf).
+        defaultAction       = "Deny"
+        ipRules             = local.collector_ip_rules
         virtualNetworkRules = []
       }
     }
