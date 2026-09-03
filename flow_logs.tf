@@ -56,6 +56,17 @@ locals {
       substr(sha1(format("%s|%s", item.subscription_id, item.location)), 0, 17),
     )
   }
+
+  # BUG-7 fix: name for the Event Grid subscription created on each flow-log storage account.
+  # Must be <= 64 chars, alphanumeric + hyphens. Derived from the same sub+region hash so it is
+  # deterministic and unique per flow-log account.
+  vnet_flow_log_event_subscription_names = {
+    for key, item in local.vnet_storage_accounts :
+    key => format(
+      "skhflow-%s-egsub",
+      substr(sha1(format("%s|%s", item.subscription_id, item.location)), 0, 12),
+    )
+  }
 }
 
 # List all VNets per subscription
@@ -173,5 +184,53 @@ resource "azapi_resource" "vnet_flow_log" {
   depends_on = [
     azapi_resource_action.register_network_provider,
     azapi_resource.vnet_flow_log_storage_account,
+  ]
+}
+
+# BUG-7 fix: The flow-log storage account previously had NO Event Grid subscription, so flow-log
+# blobs were written but never delivered to the Skyhawk collector (only the activity-log storage
+# account had a subscription). This creates an event subscription on EACH flow-log storage account
+# (one per subscription+region), filtered to the flow-log containers, pointing at the same Skyhawk
+# webhook. Without this, VNet/NSG flow logs are collected in Azure but never ingested by Skyhawk.
+resource "azapi_resource" "vnet_flow_log_storage_event_subscription" {
+  for_each = local.vnet_storage_accounts
+
+  type      = "Microsoft.EventGrid/eventSubscriptions@2022-06-15"
+  name      = local.vnet_flow_log_event_subscription_names[each.key]
+  parent_id = azapi_resource.vnet_flow_log_storage_account[each.key].id
+
+  body = {
+    properties = {
+      destination = {
+        endpointType = "WebHook"
+        properties = {
+          endpointUrl                   = var.skh_api_url
+          maxEventsPerBatch             = 200
+          preferredBatchSizeInKilobytes = 1024
+        }
+      }
+      eventDeliverySchema = "EventGridSchema"
+      retryPolicy = {
+        eventTimeToLiveInMinutes = 1440
+        maxDeliveryAttempts      = 30
+      }
+      filter = {
+        advancedFilters = [
+          {
+            key          = "subject"
+            operatorType = "StringBeginsWith"
+            values = [
+              "/blobServices/default/containers/insights-logs-networksecuritygroupflowevent/blobs/",
+              "/blobServices/default/containers/insights-logs-flowlogflowevent/blobs/",
+            ]
+          }
+        ]
+      }
+    }
+  }
+
+  depends_on = [
+    azapi_resource.vnet_flow_log_storage_account,
+    azapi_resource_action.provider_registration_state,
   ]
 }
