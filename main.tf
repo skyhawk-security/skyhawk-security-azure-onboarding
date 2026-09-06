@@ -309,9 +309,10 @@ resource "azapi_resource" "storage_event_subscription" {
           {
             key          = "subject"
             operatorType = "StringBeginsWith"
+            # This subscription is on the ACTIVITY-LOG storage account. Flow logs are written to a
+            # separate per-region storage account with its own Event Grid subscription (flow_logs.tf),
+            # so flow-log containers are intentionally NOT filtered here.
             values = [
-              "/blobServices/default/containers/insights-logs-networksecuritygroupflowevent/blobs/",
-              "/blobServices/default/containers/insights-logs-flowlogflowevent/blobs/",
               "/blobServices/default/containers/insights-activity-logs/blobs/",
               "/blobServices/default/containers/insights-logs-auditlogs/blobs/",
               "/blobServices/default/containers/insights-logs-signinlogs/blobs/",

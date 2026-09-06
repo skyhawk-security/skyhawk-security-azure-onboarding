@@ -53,6 +53,14 @@ locals {
     item.key => item
   }
 
+  # Single source of truth for the per-subscription+region hash (review #5). Both the storage
+  # account name and its Event Grid subscription name derive from this, so the hash input only
+  # lives in one place.
+  vnet_storage_account_hashes = {
+    for key, item in local.vnet_storage_accounts :
+    key => sha1(format("%s|%s", item.subscription_id, item.location))
+  }
+
   vnet_storage_account_names = {
     for key, item in local.vnet_storage_accounts :
     # BUG-1 fix: region was previously truncated to 6 chars (substr(...,0,6)), which collapsed
@@ -62,10 +70,7 @@ locals {
     # a unique name per subscription+region while staying within the 3-24 char, lowercase-alnum
     # storage account naming rules.
     #   "skhflow" (7) + 17 hex chars = 24 chars exactly.
-    key => format(
-      "skhflow%s",
-      substr(sha1(format("%s|%s", item.subscription_id, item.location)), 0, 17),
-    )
+    key => format("skhflow%s", substr(local.vnet_storage_account_hashes[key], 0, 17))
   }
 
   # BUG-7 fix: name for the Event Grid subscription created on each flow-log storage account.
@@ -75,7 +80,7 @@ locals {
     for key, item in local.vnet_storage_accounts :
     key => format(
       "skhflow-%s-egsub",
-      substr(sha1(format("%s|%s", item.subscription_id, item.location)), 0, 12),
+      substr(local.vnet_storage_account_hashes[key], 0, 12),
     )
   }
 }
