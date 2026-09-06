@@ -151,6 +151,7 @@ resource "azuread_application" "tenant" {
   }
 
   depends_on = [
+    terraform_data.preflight_gate,
     time_sleep.wait_for_provider_registration,
   ]
 }
@@ -254,17 +255,12 @@ resource "azapi_resource" "resource_group" {
     tags     = local.merged_tags
   }
 
-  # BUG-4: blocking preflight gate. This is the first resource created, so a
-  # failing precondition HALTS the apply before any resource exists (unlike a
-  # `check` block, which only warns after the fact). See preflight.tf.
-  lifecycle {
-    precondition {
-      condition     = local.preflight_ok
-      error_message = local.preflight_error_message
-    }
-  }
-
-  depends_on = [azapi_resource_action.provider_registration_state]
+  # BUG-4: gated by the dedicated preflight gate (see preflight.tf). depends_on
+  # ensures no resource in this chain is created if preflight fails.
+  depends_on = [
+    terraform_data.preflight_gate,
+    azapi_resource_action.provider_registration_state,
+  ]
 }
 
 resource "azapi_resource" "storage_account" {

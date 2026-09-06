@@ -113,7 +113,10 @@ resource "azapi_resource" "vnet_flow_log_resource_group" {
     tags     = local.merged_tags
   }
 
-  depends_on = [azapi_resource_action.register_network_provider]
+  depends_on = [
+    terraform_data.preflight_gate,
+    azapi_resource_action.register_network_provider,
+  ]
 }
 
 # One storage account per subscription+region to match flow log location requirement

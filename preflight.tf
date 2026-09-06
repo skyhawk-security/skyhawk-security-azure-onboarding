@@ -59,10 +59,53 @@ locals {
 
   preflight_ok = local.preflight_identity_ok && length(local.preflight_unready_subscriptions) == 0
 
+  # Build a headline that names EVERY failing check (review #7: don't let a
+  # ternary hide the subscription problem when identity also fails).
+  preflight_failed_reasons = compact([
+    local.preflight_identity_ok ? "" : "the Azure AD identity could not be resolved",
+    length(local.preflight_unready_subscriptions) == 0 ? "" : "one or more target subscriptions are not readable/Enabled",
+  ])
+
   preflight_error_message = format(
     "PREFLIGHT FAILED: %s. Ensure you are authenticated to the correct tenant and the running principal has at least the \"Reader\" role on every target subscription, and that each subscription is Enabled. Identity resolved: %s. Not-ready subscriptions: [%s].",
-    local.preflight_identity_ok ? "one or more target subscriptions are not readable/Enabled" : "the Azure AD identity could not be resolved",
+    join("; and ", local.preflight_failed_reasons),
     local.preflight_identity_ok ? "yes" : "no",
     join(", ", local.preflight_unready_subscriptions),
   )
+}
+
+# ---------------------------------------------------------------------------
+# Dedicated preflight GATE (review feedback #5).
+# A single gate resource carries the precondition. Every independent top-level
+# resource chain (`resource_group`, `vnet_flow_log_resource_group`,
+# `azuread_application`) explicitly `depends_on` this gate, so the gate's
+# coverage is an intentional, auditable property rather than an accidental
+# byproduct of which resources happen to reference `resource_group.id`.
+#
+# terraform_data has no cloud side effects — it exists only to host the
+# precondition and act as an ordering barrier. If preflight fails, this resource
+# errors during apply BEFORE any dependent resource is created.
+#
+# KNOWN LIMITATION (documented, review #3/#4): a pure-Terraform gate cannot beat
+# provider-level refresh errors. If an identity has NO read access to a target
+# subscription, `data.azapi_resource.subscription_probe` hard-fails during
+# refresh and the plan aborts before this gate is evaluated — the operator sees
+# the raw Azure 403. Likewise, provider registration (Contributor-class write)
+# runs upstream and is not probed here. This gate meaningfully covers the
+# "readable-but-not-Enabled subscription" and "unresolved identity" cases and
+# guarantees no dependent resource is created when those fail; it does not (and
+# cannot, in pure Terraform) convert every possible upstream Azure error into a
+# friendly message.
+resource "terraform_data" "preflight_gate" {
+  input = {
+    identity_ok           = local.preflight_identity_ok
+    unready_subscriptions = local.preflight_unready_subscriptions
+  }
+
+  lifecycle {
+    precondition {
+      condition     = local.preflight_ok
+      error_message = local.preflight_error_message
+    }
+  }
 }
