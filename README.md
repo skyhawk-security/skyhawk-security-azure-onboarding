@@ -11,7 +11,6 @@ Terraform module that onboards one or more Azure subscriptions to Skyhawk Securi
 - Storage accounts are network-hardened: `defaultAction = Deny` (public access blocked; satisfies CIS Azure benchmark 3.7), `bypass = AzureServices` (allows Azure writers such as Network Watcher, Event Grid, and diagnostic settings), plus an IP allow-list for the Skyhawk collector egress IP(s) (`collector_egress_ips`). Also `allowBlobPublicAccess = false`, `minimumTlsVersion = TLS1_2`, HTTPS-only.
 - Event Grid webhook subscriptions forwarding log blobs to the Skyhawk webhook: one on the per-subscription Activity Log storage account (filters Activity/Audit/Sign-in/StorageRead + flow-log containers), and one on each per-region flow-log storage account (filters VNet Flow Logs and NSG Flow Logs). Both are required for logs to reach Skyhawk.
 - Role assignments for the service principal: Reader on subscriptions and management group, Storage Blob Data Reader, and a custom Skyhawk role (query flow log status).
-- Preflight checks that validate the running identity can read the target subscriptions and enumerate role assignments before creating resources (fail-fast with a clear message instead of a mid-apply error).
 - Skyhawk API flows: register the tenant, then register additional subscriptions.
 
 ## Prerequisites
@@ -118,8 +117,6 @@ v2.2.0 hardens storage and fixes flow-log delivery. Behavioral changes to be awa
 - **New Event Grid subscription on flow-log storage accounts:** earlier versions did not create an
   Event Grid subscription on the flow-log storage account, so flow logs were written but never
   delivered to Skyhawk. v2.2.0 adds it. After upgrading, flow-log ingestion begins working.
-- **Preflight checks** now validate subscription read + role-assignment enumeration before creating
-  resources.
 - **Idempotent flow logs:** flow-log updates now send an explicit (disabled) Traffic Analytics
   configuration, so re-applies against flow logs that had Traffic Analytics enabled no longer fail.
 

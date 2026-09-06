@@ -114,7 +114,6 @@ resource "azapi_resource" "vnet_flow_log_resource_group" {
   }
 
   depends_on = [
-    terraform_data.preflight_gate,
     azapi_resource_action.register_network_provider,
   ]
 }

@@ -151,7 +151,6 @@ resource "azuread_application" "tenant" {
   }
 
   depends_on = [
-    terraform_data.preflight_gate,
     time_sleep.wait_for_provider_registration,
   ]
 }
@@ -255,12 +254,7 @@ resource "azapi_resource" "resource_group" {
     tags     = local.merged_tags
   }
 
-  # BUG-4: gated by the dedicated preflight gate (see preflight.tf). depends_on
-  # ensures no resource in this chain is created if preflight fails.
-  depends_on = [
-    terraform_data.preflight_gate,
-    azapi_resource_action.provider_registration_state,
-  ]
+  depends_on = [azapi_resource_action.provider_registration_state]
 }
 
 resource "azapi_resource" "storage_account" {
