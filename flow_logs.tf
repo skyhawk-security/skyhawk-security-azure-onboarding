@@ -1,4 +1,26 @@
 locals {
+  # BUG-5: Azure Storage networkAcls.ipRules require a bare IPv4 or CIDR, and it REJECTS a "/32"
+  # suffix (a single host must be given without the mask). Strip a trailing /32 while keeping real
+  # CIDR ranges intact. Used by both storage accounts to allow-list the Skyhawk collector egress IPs
+  # under defaultAction = "Deny".
+  collector_ip_rules = [
+    for cidr in var.collector_egress_ips : {
+      value  = endswith(cidr, "/32") ? trimsuffix(cidr, "/32") : cidr
+      action = "Allow"
+    }
+  ]
+
+  # BUG-5 (dedupe per review): single source of truth for the hardened storage networkAcls,
+  # referenced by BOTH the activity-log storage account (main.tf) and the flow-log storage
+  # accounts (this file). defaultAction = Deny (CIS 3.7), AzureServices bypass for first-party
+  # writers, collector egress IPs allow-listed for reads.
+  hardened_network_acls = {
+    bypass              = "AzureServices"
+    defaultAction       = "Deny"
+    ipRules             = local.collector_ip_rules
+    virtualNetworkRules = []
+  }
+
   discovered_vnets = var.enable_vnet_flow_logs ? {
     for item in flatten([
       for sub_id in var.subscription_ids : [
@@ -31,16 +53,34 @@ locals {
     item.key => item
   }
 
+  # Single source of truth for the per-subscription+region hash (review #5). Both the storage
+  # account name and its Event Grid subscription name derive from this, so the hash input only
+  # lives in one place.
+  vnet_storage_account_hashes = {
+    for key, item in local.vnet_storage_accounts :
+    key => sha1(format("%s|%s", item.subscription_id, item.location))
+  }
+
   vnet_storage_account_names = {
     for key, item in local.vnet_storage_accounts :
-    key => substr(
-      format(
-        "skhflow%s%s",
-        substr(replace(item.subscription_id, "-", ""), 0, 10),
-        substr(replace(item.location, "-", ""), 0, 6),
-      ),
-      0,
-      24,
+    # BUG-1 fix: region was previously truncated to 6 chars (substr(...,0,6)), which collapsed
+    # region variants like "eastus" and "eastus2" to the same name "eastus" and caused a global
+    # StorageAccountAlreadyTaken (409) collision. We now derive a deterministic, fixed-length,
+    # collision-free suffix from a hash of the full "subscription_id|location" key. This guarantees
+    # a unique name per subscription+region while staying within the 3-24 char, lowercase-alnum
+    # storage account naming rules.
+    #   "skhflow" (7) + 17 hex chars = 24 chars exactly.
+    key => format("skhflow%s", substr(local.vnet_storage_account_hashes[key], 0, 17))
+  }
+
+  # BUG-7 fix: name for the Event Grid subscription created on each flow-log storage account.
+  # Must be <= 64 chars, alphanumeric + hyphens. Derived from the same sub+region hash so it is
+  # deterministic and unique per flow-log account.
+  vnet_flow_log_event_subscription_names = {
+    for key, item in local.vnet_storage_accounts :
+    key => format(
+      "skhflow-%s-egsub",
+      substr(local.vnet_storage_account_hashes[key], 0, 12),
     )
   }
 }
@@ -78,7 +118,9 @@ resource "azapi_resource" "vnet_flow_log_resource_group" {
     tags     = local.merged_tags
   }
 
-  depends_on = [azapi_resource_action.register_network_provider]
+  depends_on = [
+    azapi_resource_action.register_network_provider,
+  ]
 }
 
 # One storage account per subscription+region to match flow log location requirement
@@ -100,12 +142,7 @@ resource "azapi_resource" "vnet_flow_log_storage_account" {
       allowBlobPublicAccess    = false
       minimumTlsVersion        = "TLS1_2"
       supportsHttpsTrafficOnly = true
-      networkAcls = {
-        bypass              = "AzureServices"
-        defaultAction       = "Allow"
-        ipRules             = []
-        virtualNetworkRules = []
-      }
+      networkAcls              = local.hardened_network_acls
     }
   }
 
@@ -139,11 +176,70 @@ resource "azapi_resource" "vnet_flow_log" {
         days    = 0
         enabled = false
       }
+      # BUG-2 fix: previously this block was omitted entirely. On a re-apply against a flow log that
+      # already had Traffic Analytics enabled (FlowAnalysisEnabled = true), Azure rejected the PUT
+      # with "FlowLogConfigurationCannotBeUpdated" because the value would transition from true to
+      # unspecified. We now always send an explicit flowAnalyticsConfiguration so the desired state
+      # is unambiguous and re-applies are idempotent. Skyhawk does not use Azure Traffic Analytics
+      # (we ingest raw flow logs via Event Grid), so we explicitly disable it here.
+      flowAnalyticsConfiguration = {
+        networkWatcherFlowAnalyticsConfiguration = {
+          enabled = false
+        }
+      }
     }
   }
 
   depends_on = [
     azapi_resource_action.register_network_provider,
     azapi_resource.vnet_flow_log_storage_account,
+  ]
+}
+
+# BUG-7 fix: The flow-log storage account previously had NO Event Grid subscription, so flow-log
+# blobs were written but never delivered to the Skyhawk collector (only the activity-log storage
+# account had a subscription). This creates an event subscription on EACH flow-log storage account
+# (one per subscription+region), filtered to the flow-log containers, pointing at the same Skyhawk
+# webhook. Without this, VNet/NSG flow logs are collected in Azure but never ingested by Skyhawk.
+resource "azapi_resource" "vnet_flow_log_storage_event_subscription" {
+  for_each = local.vnet_storage_accounts
+
+  type      = "Microsoft.EventGrid/eventSubscriptions@2022-06-15"
+  name      = local.vnet_flow_log_event_subscription_names[each.key]
+  parent_id = azapi_resource.vnet_flow_log_storage_account[each.key].id
+
+  body = {
+    properties = {
+      destination = {
+        endpointType = "WebHook"
+        properties = {
+          endpointUrl                   = var.skh_api_url
+          maxEventsPerBatch             = 200
+          preferredBatchSizeInKilobytes = 1024
+        }
+      }
+      eventDeliverySchema = "EventGridSchema"
+      retryPolicy = {
+        eventTimeToLiveInMinutes = 1440
+        maxDeliveryAttempts      = 30
+      }
+      filter = {
+        advancedFilters = [
+          {
+            key          = "subject"
+            operatorType = "StringBeginsWith"
+            values = [
+              "/blobServices/default/containers/insights-logs-networksecuritygroupflowevent/blobs/",
+              "/blobServices/default/containers/insights-logs-flowlogflowevent/blobs/",
+            ]
+          }
+        ]
+      }
+    }
+  }
+
+  depends_on = [
+    azapi_resource.vnet_flow_log_storage_account,
+    azapi_resource_action.provider_registration_state,
   ]
 }
