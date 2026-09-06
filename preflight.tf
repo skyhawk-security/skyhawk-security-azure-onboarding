@@ -1,37 +1,41 @@
 # =============================================================================
 # BUG-4 — Preflight permission checks
 # =============================================================================
-# Previously the module had NO pre-validation: it jumped straight into creating
-# AAD apps, resource groups, storage accounts, role assignments, flow logs, etc.
-# If the running identity lacked any required permission, it failed MID-APPLY,
-# leaving partial resources that then caused re-run collisions (BUG-1/BUG-2).
+# Goal: fail fast, BEFORE creating any resources, if the running identity clearly
+# cannot proceed — instead of dying mid-apply and leaving partial state.
 #
-# This file validates, as early as possible, that:
-#   1. We can identify the running principal (AAD reachable).
-#   2. Each target subscription is readable AND the caller can enumerate its
-#      role assignments / providers (a proxy for having Contributor-level access).
+# Design note (review feedback): Terraform `check` blocks are ADVISORY ONLY — a
+# failed assert prints a warning and the apply continues, and they run AFTER
+# provisioning. They cannot "fail fast." So preflight is enforced two ways that
+# actually block:
+#   1. Read-only data-source probes below. If the identity cannot read a target
+#      subscription, the provider hard-fails during refresh (a real 403) and the
+#      plan/apply stops before any resource is created.
+#   2. A `precondition` on the FIRST created resource (the per-subscription
+#      resource group, see main.tf) that asserts every probed subscription is
+#      Enabled/readable and the AAD identity resolved — with a clear message.
+#      A failing precondition HALTS the apply before that resource is created.
 #
-# The probes below are READ-ONLY. If a probe fails, Terraform surfaces the
-# underlying Azure 403 during plan/refresh; the `check` blocks add a clear,
-# actionable message pointing at the missing permission and subscription so the
-# operator does not have to decode a raw Azure error.
-#
-# NOTE: Azure has no single "can I do everything" API, so this is a best-effort
-# fail-fast. It catches the common cases (no Reader, no subscription access, AAD
-# not reachable). It intentionally does NOT try to pre-validate every single
-# write permission — that would require dozens of dry-run calls. The goal is to
-# turn "cryptic mid-apply 403 + partial state" into "clear pre-apply message".
+# We intentionally do NOT try to pre-check write permissions (e.g., role
+# assignment creation): Azure has no side-effect-free "can I write" API, listing
+# role assignments only proves READ (a different action than the write the module
+# needs), and it would pull an unbounded list on every plan. Verifying read +
+# identity is the honest, cheap signal; genuine write-permission gaps still
+# surface as a normal Azure error at the relevant resource (now with partial-state
+# risk reduced because the cheap checks already gated the run).
 
 # ---------------------------------------------------------------------------
-# 1. Identify the running principal (fails early if AAD is unreachable / the
-#    credentials are invalid).
+# Identify the running principal. Fails early if AAD is unreachable / creds
+# are invalid.
 # ---------------------------------------------------------------------------
 data "azuread_client_config" "current" {}
 
 # ---------------------------------------------------------------------------
-# 2. Per-subscription read probe. Reading the subscription object requires at
-#    least Reader on the subscription. If the caller cannot read it, this data
-#    source errors during refresh with the Azure authorization failure.
+# Per-subscription read probe. Reading the subscription object requires at least
+# Reader. If the caller cannot read it, this data source hard-fails during
+# refresh with the Azure authorization error, aborting the plan before any
+# resource is created. The exported `state` is also consumed by the precondition
+# on the resource group (main.tf) to produce a clear, actionable message.
 # ---------------------------------------------------------------------------
 data "azapi_resource" "subscription_probe" {
   for_each = toset(var.subscription_ids)
@@ -42,69 +46,23 @@ data "azapi_resource" "subscription_probe" {
   response_export_values = ["subscriptionId", "state"]
 }
 
-# ---------------------------------------------------------------------------
-# 3. Per-subscription role-assignment enumeration probe. Listing role
-#    assignments at subscription scope requires Microsoft.Authorization/
-#    roleAssignments/read, which Reader grants. This confirms the caller can at
-#    least see the subscription's RBAC surface (a precondition for the module's
-#    own role-assignment creation).
-# ---------------------------------------------------------------------------
-data "azapi_resource_list" "role_assignments_probe" {
-  for_each = toset(var.subscription_ids)
+locals {
+  # True only if the AAD identity resolved and every target subscription is
+  # readable and Enabled. Consumed by the resource-group precondition (main.tf).
+  preflight_identity_ok = data.azuread_client_config.current.object_id != null
 
-  type      = "Microsoft.Authorization/roleAssignments@2022-04-01"
-  parent_id = format("/subscriptions/%s", each.value)
+  preflight_unready_subscriptions = [
+    for sub_id in var.subscription_ids :
+    sub_id
+    if try(data.azapi_resource.subscription_probe[sub_id].output.state, "") != "Enabled"
+  ]
 
-  response_export_values = ["value"]
-}
+  preflight_ok = local.preflight_identity_ok && length(local.preflight_unready_subscriptions) == 0
 
-# ---------------------------------------------------------------------------
-# Check blocks: turn probe results into clear, actionable messages.
-# `check` blocks emit warnings/errors WITHOUT blocking unrelated resources,
-# and run during plan — surfacing issues before apply creates anything.
-# ---------------------------------------------------------------------------
-check "aad_identity_reachable" {
-  assert {
-    condition     = data.azuread_client_config.current.object_id != null
-    error_message = <<-EOT
-      PREFLIGHT FAILED: Could not resolve the running Azure AD identity.
-      The credentials configured for the azuread/azapi providers are invalid or
-      Azure AD is unreachable. Verify you are authenticated (az login / service
-      principal env vars) before running this module.
-    EOT
-  }
-}
-
-check "subscriptions_readable" {
-  assert {
-    condition = alltrue([
-      for sub_id in var.subscription_ids :
-      try(data.azapi_resource.subscription_probe[sub_id].output.state, "") == "Enabled"
-    ])
-    error_message = <<-EOT
-      PREFLIGHT FAILED: One or more target subscriptions are not readable or not
-      in an Enabled state with the current identity. Ensure the running principal
-      has at least the "Reader" role on every subscription in var.subscription_ids,
-      and that each subscription is active. Subscriptions checked:
-      ${join(", ", var.subscription_ids)}
-    EOT
-  }
-}
-
-check "role_assignments_enumerable" {
-  assert {
-    condition = alltrue([
-      for sub_id in var.subscription_ids :
-      can(data.azapi_resource_list.role_assignments_probe[sub_id].output.value)
-    ])
-    error_message = <<-EOT
-      PREFLIGHT FAILED: Cannot enumerate role assignments on one or more target
-      subscriptions. This module creates role assignments (subscription Reader,
-      Storage Blob Data Reader, custom skyhawk role), which requires
-      Microsoft.Authorization/roleAssignments write — typically the "Owner" or
-      "User Access Administrator" role. If this probe fails you almost certainly
-      lack the permission to create the role assignments later in the apply.
-      Subscriptions checked: ${join(", ", var.subscription_ids)}
-    EOT
-  }
+  preflight_error_message = format(
+    "PREFLIGHT FAILED: %s. Ensure you are authenticated to the correct tenant and the running principal has at least the \"Reader\" role on every target subscription, and that each subscription is Enabled. Identity resolved: %s. Not-ready subscriptions: [%s].",
+    local.preflight_identity_ok ? "one or more target subscriptions are not readable/Enabled" : "the Azure AD identity could not be resolved",
+    local.preflight_identity_ok ? "yes" : "no",
+    join(", ", local.preflight_unready_subscriptions),
+  )
 }

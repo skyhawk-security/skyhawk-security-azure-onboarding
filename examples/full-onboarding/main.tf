@@ -18,6 +18,12 @@ module "tenant_permissions" {
   # resource_group_locations = {
   #   "" = ""
   # }
+
+  # Storage accounts default to network defaultAction = "Deny" (CIS Azure 3.7). The Skyhawk
+  # collector egress IP(s) are allow-listed so log blobs can still be read. The default already
+  # includes the Skyhawk prod collector NAT IP; override ONLY if Skyhawk instructs you to (e.g.,
+  # a different collection region). Must be non-empty.
+  # collector_egress_ips = ["3.227.150.87/32"]
 }
 
 # terraform {

@@ -119,11 +119,19 @@ variable "collector_egress_ips" {
     Must include every region's collector egress IP that may read a given customer's blobs.
     Known values (verify per environment):
       - prod us-east-1 NAT: 3.227.150.87/32
-    If left empty, storage accounts still default to Deny but ONLY Azure services can reach them,
-    which will break external blob reads — set this before onboarding real customers.
+    This list MUST be non-empty: with defaultAction = "Deny", an empty list would lock out the
+    Skyhawk collector (only first-party Azure services could reach the storage), silently breaking
+    log ingestion. Validation below rejects an empty list.
   EOT
   type        = list(string)
   default     = ["3.227.150.87/32"]
+
+  validation {
+    # Reject an empty list explicitly: alltrue([]) is vacuously true, so without this a
+    # `collector_egress_ips = []` would pass and (with Deny) silently lock out the collector.
+    condition     = length(var.collector_egress_ips) > 0
+    error_message = "collector_egress_ips must not be empty: with defaultAction = Deny an empty list locks the Skyhawk collector out of the storage accounts and silently breaks log ingestion. Provide at least the collector NAT egress IP (e.g., [\"3.227.150.87/32\"])."
+  }
 
   validation {
     condition = alltrue([

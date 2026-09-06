@@ -10,6 +10,17 @@ locals {
     }
   ]
 
+  # BUG-5 (dedupe per review): single source of truth for the hardened storage networkAcls,
+  # referenced by BOTH the activity-log storage account (main.tf) and the flow-log storage
+  # accounts (this file). defaultAction = Deny (CIS 3.7), AzureServices bypass for first-party
+  # writers, collector egress IPs allow-listed for reads.
+  hardened_network_acls = {
+    bypass              = "AzureServices"
+    defaultAction       = "Deny"
+    ipRules             = local.collector_ip_rules
+    virtualNetworkRules = []
+  }
+
   discovered_vnets = var.enable_vnet_flow_logs ? {
     for item in flatten([
       for sub_id in var.subscription_ids : [
@@ -124,16 +135,7 @@ resource "azapi_resource" "vnet_flow_log_storage_account" {
       allowBlobPublicAccess    = false
       minimumTlsVersion        = "TLS1_2"
       supportsHttpsTrafficOnly = true
-      networkAcls = {
-        bypass = "AzureServices"
-        # BUG-5 fix (CIS Azure 3.7): was "Allow" (storage account reachable from the whole internet).
-        # Now "Deny" by default. First-party Azure writers (Network Watcher, Event Grid, diagnostic
-        # settings) reach it via bypass = "AzureServices"; the Skyhawk collectors reach it via the
-        # explicit ipRules allow-list below.
-        defaultAction       = "Deny"
-        ipRules             = local.collector_ip_rules
-        virtualNetworkRules = []
-      }
+      networkAcls              = local.hardened_network_acls
     }
   }
 

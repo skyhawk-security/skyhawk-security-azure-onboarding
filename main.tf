@@ -254,6 +254,16 @@ resource "azapi_resource" "resource_group" {
     tags     = local.merged_tags
   }
 
+  # BUG-4: blocking preflight gate. This is the first resource created, so a
+  # failing precondition HALTS the apply before any resource exists (unlike a
+  # `check` block, which only warns after the fact). See preflight.tf.
+  lifecycle {
+    precondition {
+      condition     = local.preflight_ok
+      error_message = local.preflight_error_message
+    }
+  }
+
   depends_on = [azapi_resource_action.provider_registration_state]
 }
 
@@ -275,16 +285,7 @@ resource "azapi_resource" "storage_account" {
       allowBlobPublicAccess    = false
       minimumTlsVersion        = "TLS1_2"
       supportsHttpsTrafficOnly = true
-      networkAcls = {
-        bypass = "AzureServices"
-        # BUG-5 fix (CIS Azure 3.7): was "Allow" (storage account reachable from the whole internet).
-        # Now "Deny" by default. First-party Azure writers (Event Grid, diagnostic settings) reach it
-        # via bypass = "AzureServices"; the Skyhawk collectors reach it via the explicit ipRules
-        # allow-list (local.collector_ip_rules, defined in flow_logs.tf).
-        defaultAction       = "Deny"
-        ipRules             = local.collector_ip_rules
-        virtualNetworkRules = []
-      }
+      networkAcls              = local.hardened_network_acls
     }
   }
 
